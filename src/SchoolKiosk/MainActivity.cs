@@ -51,6 +51,7 @@ public sealed class MainActivity : Activity
     private int foregroundRecoveryGeneration;
     private Dialog? readinessDialog;
     private bool? readinessWasReady;
+    private bool readinessPromptPending;
     private readonly Handler handler = new(Looper.MainLooper!);
 
     protected override void OnCreate(Bundle? savedInstanceState)
@@ -651,7 +652,37 @@ public sealed class MainActivity : Activity
             pinRequestPending = false;
             try { StopLockTask(); } catch { }
         }
-        if (previousScheduleState && !shouldLock) handler.PostDelayed(LaunchHonorHome, 250);
+        // Only return to Home when the configured kiosk period actually ends.
+        // A readiness failure must keep this activity visible so the owner can
+        // repair the missing permission instead of being dropped on Home.
+        if (previousScheduleState && !shouldLock && ready) handler.PostDelayed(LaunchHonorHome, 250);
+        if (!ready && config.SetupComplete && config.IsKioskTime(DateTime.Now))
+            QueueReadinessPrompt();
+    }
+
+    private void QueueReadinessPrompt()
+    {
+        if (readinessPromptPending || readinessDialog?.IsShowing == true) return;
+        readinessPromptPending = true;
+        handler.PostDelayed(() =>
+        {
+            readinessPromptPending = false;
+            if (IsFinishing || IsDestroyed || !config.SetupComplete ||
+                !config.IsKioskTime(DateTime.Now) || KioskReadiness.IsReady(this, config)) return;
+            var keyguard = (KeyguardManager?)GetSystemService(KeyguardService);
+            if (keyguard?.IsKeyguardLocked == true) return;
+
+            if (resumed && Window?.DecorView?.HasWindowFocus == true)
+            {
+                ShowReadinessGate(rebuild: true);
+                return;
+            }
+
+            var launch = new Intent(this, typeof(MainActivity));
+            launch.SetAction("com.ahura.schoolkiosk.READINESS_REQUIRED");
+            launch.AddFlags(ActivityFlags.NewTask | ActivityFlags.ClearTop | ActivityFlags.SingleTop);
+            try { StartActivity(launch); } catch { }
+        }, 300);
     }
 
     private void CheckSchedule()

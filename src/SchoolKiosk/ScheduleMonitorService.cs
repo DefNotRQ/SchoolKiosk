@@ -56,6 +56,21 @@ public sealed class ScheduleMonitorService : Service
         var config = new KioskConfig(this);
         if (!config.SetupComplete || !KioskReadiness.IsReady(this, config))
         {
+            // Changing a runtime permission can kill the activity process. A
+            // sticky watchdog restart is then our only chance to present the
+            // required-fixes screen during an active kiosk period.
+            if (config.SetupComplete && config.IsKioskTime(DateTime.Now))
+            {
+                var readinessKeyguard = (KeyguardManager?)GetSystemService(KeyguardService);
+                if (readinessKeyguard?.IsKeyguardLocked != true)
+                {
+                    var repair = new Intent(this, typeof(MainActivity));
+                    repair.SetAction("com.ahura.schoolkiosk.READINESS_REQUIRED");
+                    repair.AddFlags(ActivityFlags.NewTask | ActivityFlags.ClearTop | ActivityFlags.SingleTop);
+                    try { StartActivity(repair); }
+                    catch (Exception ex) { Log.Warn("SchoolKiosk", "Readiness launch denied: " + ex.GetType().Name); }
+                }
+            }
             ScheduleReceiver.Cancel(this);
             StopSelf();
             return;
