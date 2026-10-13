@@ -13,6 +13,7 @@ internal sealed class KioskConfig
     public int ActiveDays => 0x3E;
     public string Pin { get => prefs.GetString("pin", "")!; set => Put("pin", value); }
     public bool SetupComplete { get => prefs.GetBoolean("setup", false); set => Put("setup", value); }
+    public bool BackgroundLaunchConfirmed { get => prefs.GetBoolean("backgroundLaunchConfirmed", false); set => Put("backgroundLaunchConfirmed", value); }
     public int Brightness { get => prefs.GetInt("brightness", 180); set => Put("brightness", Math.Clamp(value, 10, 255)); }
     public bool AdaptiveBrightness { get => prefs.GetBoolean("adaptiveBrightness", true); set => Put("adaptiveBrightness", value); }
     public int FailedPinAttempts

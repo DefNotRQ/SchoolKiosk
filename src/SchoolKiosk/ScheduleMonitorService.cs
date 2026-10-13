@@ -17,7 +17,8 @@ public sealed class ScheduleMonitorService : Service
     private ClockReceiver? clockReceiver;
     public static void EnsureRunning(Context context)
     {
-        if (!new KioskConfig(context).SetupComplete) return;
+        var config = new KioskConfig(context);
+        if (!config.SetupComplete || !KioskReadiness.IsReady(context, config)) return;
         try { context.StartForegroundService(new Intent(context, typeof(ScheduleMonitorService))); }
         catch (Exception ex) { Log.Warn("SchoolKiosk", "Schedule service start denied: " + ex.GetType().Name); }
     }
@@ -53,7 +54,13 @@ public sealed class ScheduleMonitorService : Service
     {
         handler.RemoveCallbacksAndMessages(null);
         var config = new KioskConfig(this);
-        var active = config.SetupComplete && config.IsKioskTime(DateTime.Now);
+        if (!config.SetupComplete || !KioskReadiness.IsReady(this, config))
+        {
+            ScheduleReceiver.Cancel(this);
+            StopSelf();
+            return;
+        }
+        var active = config.IsKioskTime(DateTime.Now);
         var keyguard = (KeyguardManager?)GetSystemService(KeyguardService);
         if ((active || wasActive) && !MainActivity.IsVisible && keyguard?.IsKeyguardLocked != true)
         {

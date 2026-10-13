@@ -18,6 +18,10 @@ School Kiosk turns an Android tablet into a scheduled, full-screen web browser. 
 
 Fresh installations contain **no default website and no default administrator PIN**. The administrator chooses both during first-run setup.
 
+## Download
+
+Download the latest signed ARM64 APK from [GitHub Releases](https://github.com/DefNotRQ/SchoolKiosk/releases/latest). This works directly from a tablet browser; a PC is not required.
+
 ## Highlights
 
 - Scheduled kiosk window: Monday–Friday, 08:30–15:30 in device-local time.
@@ -27,6 +31,7 @@ Fresh installations contain **no default website and no default administrator PI
 - Wi-Fi and Bluetooth shortcuts plus manual and automatic brightness controls.
 - Failed-PIN lockout and a five-minute administrator-session timeout.
 - Foreground schedule monitor, exact boundary alarms, and boot recovery.
+- Mandatory deployment-readiness gate: locking stays disabled until required permissions and device settings pass.
 - Device-owner support for persistent Home routing, lock-task allowlisting, and stronger system UI restrictions.
 - User-level screen-pinning fallback when device-owner provisioning is unavailable.
 
@@ -88,7 +93,7 @@ For reliable dedicated-device restrictions, provision the app as device owner. S
 
 An ordinary APK cannot silently disable every system escape route. Screen pinning is controlled by Android and may display system guidance or allow a hardware unpin gesture. Strong kiosk controls require device-owner provisioning on a freshly reset tablet.
 
-Some manufacturers also restrict background launches. On Honor/MagicOS, allow School Kiosk to auto-launch and run in the background under **Settings → Battery → App launch**.
+Some manufacturers also restrict background launches. The app blocks kiosk activation until its verifiable requirements pass and the administrator confirms the manufacturer-specific launch settings. See [Honor and Xiaomi setup](docs/DEVICE_SETUP.md#manufacturer-specific-background-settings).
 
 ## Privacy
 

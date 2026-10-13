@@ -11,6 +11,11 @@ public sealed class ScheduleReceiver : BroadcastReceiver
     {
         if (context is null) return;
         var cfg = new KioskConfig(context);
+        if (!cfg.SetupComplete || !KioskReadiness.IsReady(context, cfg))
+        {
+            Cancel(context);
+            return;
+        }
         ScheduleMonitorService.EnsureRunning(context);
         if (cfg.SetupComplete && ((KeyguardManager?)context.GetSystemService(Context.KeyguardService))?.IsKeyguardLocked != true)
         {
@@ -24,7 +29,11 @@ public sealed class ScheduleReceiver : BroadcastReceiver
     public static void ScheduleNext(Context context)
     {
         var cfg = new KioskConfig(context);
-        if (!cfg.SetupComplete) return;
+        if (!cfg.SetupComplete || !KioskReadiness.IsReady(context, cfg))
+        {
+            Cancel(context);
+            return;
+        }
         var now = DateTime.Now;
         var candidates = Enumerable.Range(0, 9)
             .SelectMany(offset =>
@@ -71,5 +80,19 @@ public sealed class ScheduleReceiver : BroadcastReceiver
             alarm.SetExactAndAllowWhileIdle(AlarmType.RtcWakeup, trigger, pending);
         else
             alarm.SetAndAllowWhileIdle(AlarmType.RtcWakeup, trigger, pending);
+    }
+
+    public static void Cancel(Context context)
+    {
+        var alarm = (AlarmManager?)context.GetSystemService(Context.AlarmService);
+        if (alarm is null) return;
+        var receiver = PendingIntent.GetBroadcast(context, 40, new Intent(context, typeof(ScheduleReceiver)),
+            PendingIntentFlags.NoCreate | PendingIntentFlags.Immutable);
+        var activityIntent = new Intent(context, typeof(MainActivity));
+        activityIntent.SetAction("com.ahura.schoolkiosk.SCHEDULE_START");
+        var activity = PendingIntent.GetActivity(context, 41, activityIntent,
+            PendingIntentFlags.NoCreate | PendingIntentFlags.Immutable);
+        if (receiver is not null) alarm.Cancel(receiver);
+        if (activity is not null) alarm.Cancel(activity);
     }
 }

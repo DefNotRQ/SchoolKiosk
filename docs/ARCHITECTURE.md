@@ -10,6 +10,7 @@ School Kiosk is a native .NET Android application built around one full-screen a
 - `BootReceiver` restores the monitor and alarm after reboot, package replacement, time changes, or timezone changes.
 - `HomeRouterActivity` routes Home to the kiosk during its active window and to the system launcher outside it.
 - `KioskAdminReceiver` exposes Android device-administration and device-owner functionality.
+- `KioskReadiness` verifies the permissions and operating-system state required for reliable activation. `KioskReadinessState` keeps the all-requirements gate independently testable.
 - `SchoolSchedule` is the dependency-free schedule model used by both the app and tests.
 
 ## Browser model
@@ -25,3 +26,5 @@ In device-owner mode, Android can allowlist the app for lock task, make it the p
 ## Schedule
 
 The current schedule is compiled as Monday–Friday, 08:30–15:30 local time. `SchoolSchedule.NextChange` computes the next boundary, while the foreground monitor performs short-interval recovery checks during the active window.
+
+Before the schedule can activate, the readiness gate requires overlay access, exact alarms, notifications, battery exemption, a usable lock-task path, and explicit confirmation of OEM background-launch configuration. If any requirement is revoked, the activity releases lock task, cancels schedule alarms, and stops the monitor instead of entering a partial kiosk state.

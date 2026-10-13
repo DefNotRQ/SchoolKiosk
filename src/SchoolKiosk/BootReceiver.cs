@@ -17,7 +17,7 @@ public sealed class BootReceiver : BroadcastReceiver
         ScheduleMonitorService.EnsureRunning(context);
         ScheduleReceiver.ScheduleNext(context);
         var config = new KioskConfig(context);
-        if (!config.SetupComplete || !config.IsKioskTime(DateTime.Now)) return;
+        if (!config.SetupComplete || !KioskReadiness.IsReady(context, config) || !config.IsKioskTime(DateTime.Now)) return;
         if (((KeyguardManager?)context.GetSystemService(Context.KeyguardService))?.IsKeyguardLocked == true) return;
         var launch = new Intent(context, typeof(MainActivity));
         launch.SetAction("com.ahura.schoolkiosk.BOOT_DURING_SCHEDULE");

@@ -18,6 +18,7 @@ public sealed class MainActivity : Activity
 {
     internal static bool IsVisible { get; private set; }
     private const int MaxTabs = 20;
+    private const int NotificationPermissionRequestCode = 401;
     private KioskConfig config = null!;
     private FrameLayout browserHost = null!;
     private readonly List<WebView> tabs = new();
@@ -48,6 +49,8 @@ public sealed class MainActivity : Activity
     private bool pinDialogOpen;
     private long lastTap;
     private int foregroundRecoveryGeneration;
+    private Dialog? readinessDialog;
+    private bool? readinessWasReady;
     private readonly Handler handler = new(Looper.MainLooper!);
 
     protected override void OnCreate(Bundle? savedInstanceState)
@@ -59,10 +62,9 @@ public sealed class MainActivity : Activity
         BuildUi();
         ApplyBrightness();
         ConfigureDeviceOwner();
-        ScheduleMonitorService.EnsureRunning(this);
-        ScheduleReceiver.ScheduleNext(this);
         ApplySchedule();
         if (!config.SetupComplete) ShowSettings(firstRun: true);
+        else handler.PostDelayed(() => RefreshReadiness(promptIfMissing: true), 250);
         handler.PostDelayed(CheckSchedule, 15_000);
         wasOnline = IsNetworkOnline();
         handler.PostDelayed(CheckConnectivityAndRecover, 2_000);
@@ -71,8 +73,7 @@ public sealed class MainActivity : Activity
     protected override void OnNewIntent(Intent? intent)
     {
         base.OnNewIntent(intent);
-        ScheduleReceiver.ScheduleNext(this);
-        ApplySchedule();
+        RefreshReadiness(promptIfMissing: true);
     }
 
     protected override void OnResume()
@@ -81,7 +82,14 @@ public sealed class MainActivity : Activity
         foregroundRecoveryGeneration++;
         resumed = true;
         IsVisible = true;
-        if (config is not null) handler.Post(ApplySchedule);
+        if (config is not null) handler.PostDelayed(() => RefreshReadiness(promptIfMissing: true), 150);
+    }
+
+    public override void OnRequestPermissionsResult(int requestCode, string[] permissions, Android.Content.PM.Permission[] grantResults)
+    {
+        base.OnRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == NotificationPermissionRequestCode)
+            handler.PostDelayed(() => RefreshReadiness(promptIfMissing: true), 150);
     }
 
     protected override void OnPause()
@@ -95,12 +103,12 @@ public sealed class MainActivity : Activity
 
     private void QueueForegroundRecovery()
     {
-        if (config is null || !config.SetupComplete || !config.IsKioskTime(DateTime.Now)) return;
+        if (config is null || !config.SetupComplete || !KioskReadiness.IsReady(this, config) || !config.IsKioskTime(DateTime.Now)) return;
         var generation = ++foregroundRecoveryGeneration;
         handler.PostDelayed(() =>
         {
             if (generation != foregroundRecoveryGeneration || resumed || IsFinishing || IsDestroyed) return;
-            if (!config.IsKioskTime(DateTime.Now)) return;
+            if (!KioskReadiness.IsReady(this, config) || !config.IsKioskTime(DateTime.Now)) return;
             var keyguard = (KeyguardManager?)GetSystemService(KeyguardService);
             if (keyguard?.IsKeyguardLocked == true) return;
             var launch = new Intent(this, typeof(MainActivity));
@@ -115,7 +123,7 @@ public sealed class MainActivity : Activity
         base.OnWindowFocusChanged(hasFocus);
         if (hasFocus)
         {
-            ApplySystemBarMode(config?.IsKioskTime(DateTime.Now) == true);
+            ApplySystemBarMode(config?.IsKioskTime(DateTime.Now) == true && KioskReadiness.IsReady(this, config));
             UpdateIndicators();
         }
         if (hasFocus && config is not null)
@@ -575,7 +583,22 @@ public sealed class MainActivity : Activity
         if (!resumed || IsFinishing || IsDestroyed) return;
         var keyguard = (KeyguardManager?)GetSystemService(KeyguardService);
         if (keyguard?.IsKeyguardLocked == true) return;
-        var shouldLock = config.SetupComplete && config.IsKioskTime(DateTime.Now);
+        var ready = config.SetupComplete && KioskReadiness.IsReady(this, config);
+        if (readinessWasReady != ready)
+        {
+            readinessWasReady = ready;
+            if (ready)
+            {
+                ScheduleMonitorService.EnsureRunning(this);
+                ScheduleReceiver.ScheduleNext(this);
+            }
+            else
+            {
+                try { StopService(new Intent(this, typeof(ScheduleMonitorService))); } catch { }
+                ScheduleReceiver.Cancel(this);
+            }
+        }
+        var shouldLock = ready && config.IsKioskTime(DateTime.Now);
         // Keep the real system controls available outside scheduled kiosk
         // hours. During a kiosk period, lock task and immersive mode suppress
         // Home/Recents as intended.
@@ -813,10 +836,10 @@ public sealed class MainActivity : Activity
         connectivityRow.AddView(bluetooth, new LinearLayout.LayoutParams(0, Dp(66), 1) { LeftMargin = Dp(6) });
         accessCard.AddView(connectivityRow, new LinearLayout.LayoutParams(-1, Dp(66)) { BottomMargin = Dp(9) });
 
-        var reliabilityReady = HasOverlayAccess() && HasExactAlarmAccess();
-        var reliability = SecondaryButton("Background launch access",
-            reliabilityReady ? "Ready — scheduled kiosk starts can open automatically" : "Action required — allow the missing system access");
-        reliability.Click += (_, _) => OpenNextReliabilityPermission();
+        var reliabilityReady = KioskReadiness.IsReady(this, config);
+        var reliability = SecondaryButton("Deployment readiness",
+            reliabilityReady ? "Ready — every required check is enabled" : "Action required — locking stays paused until setup is complete");
+        reliability.Click += (_, _) => ShowReadinessGate(rebuild: true);
         accessCard.AddView(reliability, new LinearLayout.LayoutParams(-1, Dp(62)) { BottomMargin = Dp(9) });
 
         var clearTabs = SecondaryButton($"Clear browser tabs · {tabs.Count} open", "Close every tab and return to the school site", destructive: true);
@@ -891,14 +914,10 @@ public sealed class MainActivity : Activity
             config.Brightness = brightnessValue;
             config.AdaptiveBrightness = adaptiveBrightness;
             config.SetupComplete = true;
-            ScheduleMonitorService.EnsureRunning(this);
             ApplyBrightness();
             ResetTabs();
-            ScheduleReceiver.ScheduleNext(this);
-            ApplySchedule();
             dialog.Dismiss();
-            if (firstRun && (!HasOverlayAccess() || !HasExactAlarmAccess()))
-                handler.PostDelayed(OpenNextReliabilityPermission, 250);
+            handler.PostDelayed(() => RefreshReadiness(promptIfMissing: true), 250);
         };
 
         dialog.SetContentView(shell);
@@ -1218,37 +1237,170 @@ public sealed class MainActivity : Activity
         ShowNotice("Settings stay locked", "Android connectivity settings can leave the kiosk. Configure Wi-Fi and Bluetooth outside school hours; the app will not unpin to open them.");
     }
 
-    private bool HasOverlayAccess()
-        => Build.VERSION.SdkInt < BuildVersionCodes.M || Settings.CanDrawOverlays(this);
-
-    private bool HasExactAlarmAccess()
+    private void RefreshReadiness(bool promptIfMissing)
     {
-        if (Build.VERSION.SdkInt < BuildVersionCodes.S) return true;
-        var alarm = (AlarmManager?)GetSystemService(AlarmService);
-        return alarm?.CanScheduleExactAlarms() == true;
-    }
-
-    private void OpenNextReliabilityPermission()
-    {
-        if (config.SetupComplete && config.IsKioskTime(DateTime.Now))
+        if (!config.SetupComplete) return;
+        var state = KioskReadiness.Evaluate(this, config);
+        ApplySchedule();
+        if (state.IsReady)
         {
-            ShowNotice("Setup outside school hours", "System permission settings are unavailable while the school schedule is active.");
+            if (readinessDialog?.IsShowing == true) readinessDialog.Dismiss();
             return;
         }
+
+        if (!promptIfMissing || !resumed) return;
+        ShowReadinessGate(rebuild: true);
+    }
+
+    private void ShowReadinessGate(bool rebuild = false)
+    {
+        if (!config.SetupComplete) return;
+        var state = KioskReadiness.Evaluate(this, config);
+        if (state.IsReady)
+        {
+            if (readinessDialog?.IsShowing == true) readinessDialog.Dismiss();
+            ApplySchedule();
+            return;
+        }
+        if (readinessDialog?.IsShowing == true)
+        {
+            if (!rebuild) return;
+            readinessDialog.Dismiss();
+        }
+
+        var dialog = NewDialog();
+        var shell = new LinearLayout(this) { Orientation = Orientation.Vertical };
+        shell.Background = Rounded(Color.ParseColor("#F5F7FC"), 26);
+        shell.SetPadding(Dp(28), Dp(24), Dp(28), Dp(20));
+        shell.AddView(Heading("Finish device setup", 25));
+        shell.AddView(Body("Kiosk locking is paused. Complete every required item below, then recheck. Nothing will be pinned until all checks pass."), Margin(top: 6, bottom: 18));
+
+        var scroll = new ScrollView(this) { FillViewport = true, VerticalScrollBarEnabled = false };
+        var content = new LinearLayout(this) { Orientation = Orientation.Vertical };
+        scroll.AddView(content, new ScrollView.LayoutParams(-1, -2));
+
+        void AddRequirement(string title, string detail, bool complete, string action, System.Action fix)
+        {
+            var card = SectionCard((complete ? "✓  " : "!  ") + title, complete ? "Ready" : detail);
+            if (complete)
+            {
+                card.Background = Rounded(Color.ParseColor("#F0FAF5"), 22, Color.ParseColor("#B9E7CF"), 1);
+            }
+            else
+            {
+                var button = ActionButton(action, primary: true);
+                button.Click += (_, _) => fix();
+                card.AddView(button, new LinearLayout.LayoutParams(-1, Dp(50)) { TopMargin = Dp(12) });
+            }
+            content.AddView(card, Margin(bottom: 10));
+        }
+
+        AddRequirement("Display over other apps",
+            "Allows the scheduled kiosk to return while another app or Home is visible.", state.Overlay, "Enable access",
+            () => OpenReadinessSetting("overlay"));
+        AddRequirement("Exact alarms",
+            "Allows the kiosk to start and stop at the requested boundary time.", state.ExactAlarms, "Allow exact alarms",
+            () => OpenReadinessSetting("alarm"));
+        AddRequirement("Notifications",
+            "Required for Android to keep the schedule monitor running visibly in the background.", state.Notifications, "Allow notifications",
+            () => OpenReadinessSetting("notifications"));
+        AddRequirement("Unrestricted battery use",
+            "Prevents Android battery optimization from suspending the schedule monitor.", state.BatteryExemption, "Allow unrestricted use",
+            () => OpenReadinessSetting("battery"));
+        AddRequirement(state.DeviceOwner ? "Device-owner lock task" : "Android screen pinning",
+            state.DeviceOwner ? "Managed lock task is configured by the device owner." : "Turn on Screen pinning in Android security settings.", state.LockTask,
+            "Open security settings", () => OpenReadinessSetting("pinning"));
+
+        var manufacturer = (Build.Manufacturer ?? "").ToLowerInvariant();
+        var isHonor = manufacturer.Contains("honor") || manufacturer.Contains("huawei");
+        var isXiaomi = manufacturer.Contains("xiaomi") || manufacturer.Contains("redmi") || manufacturer.Contains("poco");
+        var launchInstructions = isHonor
+            ? "Turn off automatic management for School Kiosk and enable Auto-launch, Secondary launch, and Run in background."
+            : isXiaomi
+                ? "Enable Background autostart, choose No restrictions for battery use, and lock School Kiosk in Recents."
+                : "Allow School Kiosk to auto-start and run in the background in your manufacturer's app or battery settings.";
+        var launchCard = SectionCard((state.BackgroundLaunchConfirmed ? "✓  " : "!  ") + "Manufacturer app launch",
+            state.BackgroundLaunchConfirmed ? "Confirmed" : launchInstructions);
+        if (state.BackgroundLaunchConfirmed)
+        {
+            launchCard.Background = Rounded(Color.ParseColor("#F0FAF5"), 22, Color.ParseColor("#B9E7CF"), 1);
+        }
+        else
+        {
+            var launchActions = new LinearLayout(this) { Orientation = Orientation.Horizontal };
+            var open = ActionButton("Open App launch", primary: false);
+            open.Click += (_, _) => OpenReadinessSetting("launch");
+            var confirm = ActionButton("I completed these steps", primary: true);
+            confirm.Click += (_, _) =>
+            {
+                config.BackgroundLaunchConfirmed = true;
+                ShowReadinessGate(rebuild: true);
+            };
+            launchActions.AddView(open, new LinearLayout.LayoutParams(0, Dp(50), 1) { RightMargin = Dp(6) });
+            launchActions.AddView(confirm, new LinearLayout.LayoutParams(0, Dp(50), 1) { LeftMargin = Dp(6) });
+            launchCard.AddView(launchActions, new LinearLayout.LayoutParams(-1, Dp(50)) { TopMargin = Dp(12) });
+        }
+        content.AddView(launchCard, Margin(bottom: 10));
+
+        var ownerCard = SectionCard(state.DeviceOwner ? "Enhanced protection active" : "Enhanced protection optional",
+            state.DeviceOwner ? "This tablet is provisioned in device-owner mode." : "Device-owner mode is not required for readiness, but it provides stronger kiosk protection than screen pinning.");
+        content.AddView(ownerCard, Margin(bottom: 10));
+        shell.AddView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+
+        var recheck = ActionButton("Recheck everything", primary: true);
+        recheck.Click += (_, _) => ShowReadinessGate(rebuild: true);
+        shell.AddView(recheck, new LinearLayout.LayoutParams(-1, Dp(54)) { TopMargin = Dp(10) });
+
+        dialog.SetContentView(shell);
+        dialog.SetCancelable(false);
+        dialog.SetCanceledOnTouchOutside(false);
+        dialog.DismissEvent += (_, _) => { if (ReferenceEquals(readinessDialog, dialog)) readinessDialog = null; };
+        readinessDialog = dialog;
+        ShowDialog(dialog, widthFraction: 0.78f, heightFraction: 0.92f);
+    }
+
+    private void OpenReadinessSetting(string requirement)
+    {
         try
         {
             var packageUri = Android.Net.Uri.Parse($"package:{PackageName}");
-            if (!HasOverlayAccess())
+            switch (requirement)
             {
-                StartActivity(new Intent(Settings.ActionManageOverlayPermission, packageUri));
-                return;
+                case "overlay":
+                    StartActivity(new Intent(Settings.ActionManageOverlayPermission, packageUri));
+                    break;
+                case "alarm":
+                    StartActivity(new Intent(Settings.ActionRequestScheduleExactAlarm, packageUri));
+                    break;
+                case "notifications":
+                    if (Build.VERSION.SdkInt >= BuildVersionCodes.Tiramisu)
+                        RequestPermissions(new[] { Android.Manifest.Permission.PostNotifications }, NotificationPermissionRequestCode);
+                    break;
+                case "battery":
+                    StartActivity(new Intent(Settings.ActionRequestIgnoreBatteryOptimizations, packageUri));
+                    break;
+                case "pinning":
+                    Toast.MakeText(this, "Turn on Screen pinning, then return to School Kiosk", ToastLength.Long)!.Show();
+                    StartActivity(new Intent(Settings.ActionSecuritySettings));
+                    break;
+                case "launch":
+                    var manufacturer = (Build.Manufacturer ?? "").ToLowerInvariant();
+                    if (manufacturer.Contains("honor") || manufacturer.Contains("huawei"))
+                    {
+                        var launch = new Intent("hihonor.intent.action.HSM_STARTUPAPP_MANAGER");
+                        try { StartActivity(launch); }
+                        catch { StartActivity(new Intent(Settings.ActionApplicationDetailsSettings, packageUri)); }
+                    }
+                    else if (manufacturer.Contains("xiaomi") || manufacturer.Contains("redmi") || manufacturer.Contains("poco"))
+                    {
+                        var launch = new Intent("miui.intent.action.OP_AUTO_START");
+                        launch.SetComponent(new ComponentName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"));
+                        try { StartActivity(launch); }
+                        catch { StartActivity(new Intent(Settings.ActionApplicationDetailsSettings, packageUri)); }
+                    }
+                    else StartActivity(new Intent(Settings.ActionApplicationDetailsSettings, packageUri));
+                    break;
             }
-            if (!HasExactAlarmAccess() && Build.VERSION.SdkInt >= BuildVersionCodes.S)
-            {
-                StartActivity(new Intent(Settings.ActionRequestScheduleExactAlarm, packageUri));
-                return;
-            }
-            ShowNotice("Background launch is ready", "The tablet can wake School Kiosk at the scheduled start time, even while another app or the Home screen is visible.");
         }
         catch
         {
