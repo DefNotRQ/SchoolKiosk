@@ -1,0 +1,51 @@
+# Build output
+bin/
+obj/
+artifacts/
+publish/
+
+# IDE and user state
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# Local Android tooling
+.tools/
+.gradle/
+local.properties
+
+# Signing material and secrets
+signing/
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+*KEEP-PRIVATE*
+
+# Packages, device captures, and test artifacts
+*.apk
+*.aab
+*.apks
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.xml.tmp
+uiautomator*.xml
+device-*.xml
+qa-*
+
+# Keep the actual Android resources tracked
+!src/SchoolKiosk/Resources/**/*.png
+!src/SchoolKiosk/Resources/**/*.jpg
+!src/SchoolKiosk/Resources/**/*.jpeg
+!src/SchoolKiosk/Resources/**/*.webp
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
