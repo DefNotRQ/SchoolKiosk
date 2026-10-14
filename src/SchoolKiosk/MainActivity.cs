@@ -59,6 +59,7 @@ public sealed class MainActivity : Activity
     {
         base.OnCreate(savedInstanceState);
         config = new KioskConfig(this);
+        CancelTemporaryUnlockFromManualLaunch(Intent);
         failedPinAttempts = config.FailedPinAttempts;
         pinLockedUntil = config.PinLockedUntilUnixMs;
         BuildUi();
@@ -75,7 +76,16 @@ public sealed class MainActivity : Activity
     protected override void OnNewIntent(Intent? intent)
     {
         base.OnNewIntent(intent);
+        CancelTemporaryUnlockFromManualLaunch(intent);
         RefreshReadiness(promptIfMissing: true);
+    }
+
+    private void CancelTemporaryUnlockFromManualLaunch(Intent? intent)
+    {
+        if (intent?.Action != Intent.ActionMain || !intent.HasCategory(Intent.CategoryLauncher)) return;
+        if (!config.IsTemporaryUnlockActive(DateTime.Now)) return;
+        config.CancelTemporaryUnlock();
+        ScheduleReceiver.ScheduleNext(this);
     }
 
     protected override void OnResume()
@@ -678,7 +688,7 @@ public sealed class MainActivity : Activity
         // Only return to Home when the configured kiosk period actually ends.
         // A readiness failure must keep this activity visible so the owner can
         // repair the missing permission instead of being dropped on Home.
-        if (previousScheduleState && !shouldLock && ready) handler.PostDelayed(LaunchHonorHome, 250);
+        if (previousScheduleState && !shouldLock && ready) handler.PostDelayed(LaunchHome, 250);
         if (!ready && config.SetupComplete && config.IsKioskTime(DateTime.Now))
             QueueReadinessPrompt();
     }
@@ -714,7 +724,9 @@ public sealed class MainActivity : Activity
         ApplySchedule();
         // Screen pinning can be manually released. While school time is active,
         // check the real lock-task state without waiting for the next minute.
-        handler.PostDelayed(CheckSchedule, config.IsKioskTime(DateTime.Now) ? 1_000 : 15_000);
+        var now = DateTime.Now;
+        var watchOverrideExpiry = config.IsScheduledKioskTime(now) && !config.IsTodaySkipped(now);
+        handler.PostDelayed(CheckSchedule, watchOverrideExpiry ? 1_000 : 15_000);
     }
 
     private void HandleSecretTap()
@@ -726,18 +738,7 @@ public sealed class MainActivity : Activity
         if (secretTaps >= 5) { secretTaps = 0; ShowPin(); }
     }
 
-    private void LaunchHonorHome()
-    {
-        try
-        {
-            var honorHome = new Intent(Intent.ActionMain);
-            honorHome.AddCategory(Intent.CategoryHome);
-            honorHome.SetComponent(new ComponentName("com.hihonor.android.launcher", "com.hihonor.android.launcher.unihome.UniHomeLauncher"));
-            honorHome.AddFlags(ActivityFlags.NewTask | ActivityFlags.ClearTop);
-            StartActivity(honorHome);
-        }
-        catch { }
-    }
+    private void LaunchHome() => HomeLauncher.Open(this);
 
     private void ShowPin()
     {
@@ -747,7 +748,7 @@ public sealed class MainActivity : Activity
         dialog.DismissEvent += (_, _) => pinDialogOpen = false;
         var card = NewCard(Dp(28));
         card.AddView(Heading("Administrator access", 26));
-        card.AddView(Body("Enter your PIN to manage the kiosk, network, schedule, and browser tabs."), Margin(bottom: 22));
+        card.AddView(Body("Enter an administrator, skip-today, or 15-minute access code."), Margin(bottom: 22));
 
         var quickClear = SecondaryButton($"Clear browser tabs · {tabs.Count} open", "No PIN required — returns to the school home page", destructive: true);
         quickClear.Click += (_, _) =>
@@ -757,7 +758,7 @@ public sealed class MainActivity : Activity
         };
         card.AddView(quickClear, new LinearLayout.LayoutParams(-1, Dp(64)) { BottomMargin = Dp(18) });
 
-        var input = ModernInput("Admin PIN", config.Pin.Length);
+        var input = ModernInput("Access code", Math.Max(config.Pin.Length, 6));
         input.InputType = Android.Text.InputTypes.ClassNumber | Android.Text.InputTypes.NumberVariationPassword;
         card.AddView(input, new LinearLayout.LayoutParams(-1, Dp(58)));
         var error = ErrorText();
@@ -766,7 +767,7 @@ public sealed class MainActivity : Activity
         var actions = new LinearLayout(this) { Orientation = Orientation.Horizontal };
         actions.SetGravity(GravityFlags.Right);
         var cancel = ActionButton("Cancel", primary: false);
-        var unlock = ActionButton("Unlock settings", primary: true);
+        var unlock = ActionButton("Continue", primary: true);
         actions.AddView(cancel, new LinearLayout.LayoutParams(Dp(142), Dp(52)) { RightMargin = Dp(10) });
         actions.AddView(unlock, new LinearLayout.LayoutParams(Dp(190), Dp(52)));
         card.AddView(actions);
@@ -802,7 +803,21 @@ public sealed class MainActivity : Activity
                 RefreshLockout();
                 return;
             }
-            if (input.Text == config.Pin)
+            var enteredCode = input.Text ?? "";
+            if (enteredCode == config.SkipTodayCode || enteredCode == config.TemporaryUnlockCode)
+            {
+                failedPinAttempts = 0;
+                pinLockedUntil = 0;
+                config.FailedPinAttempts = 0;
+                config.PinLockedUntilUnixMs = 0;
+                if (enteredCode == config.SkipTodayCode) config.SkipToday(DateTime.Now);
+                else config.StartTemporaryUnlock(DateTime.Now);
+                dialog.Dismiss();
+                ScheduleReceiver.ScheduleNext(this);
+                ApplySchedule();
+                handler.PostDelayed(LaunchHome, 250);
+            }
+            else if (enteredCode == config.Pin)
             {
                 failedPinAttempts = 0;
                 pinLockedUntil = 0;
@@ -873,13 +888,37 @@ public sealed class MainActivity : Activity
         var scheduleCard = SectionCard("School schedule", "Monday through Friday, 08:30 to 15:30 (tablet local time). Weekends are unlocked. This schedule is fixed.");
         content.AddView(scheduleCard, Margin(bottom: 14));
 
-        var accessCard = SectionCard("Access & maintenance", "The PIN protects settings during and outside kiosk hours.");
+        var accessCard = SectionCard("Access & maintenance", "Use separate private codes for settings and temporary schedule overrides.");
         var pin = ModernInput("At least 4 digits", config.Pin.Length);
         pin.Text = config.Pin;
         pin.InputType = Android.Text.InputTypes.ClassNumber | Android.Text.InputTypes.NumberVariationPassword;
         accessCard.AddView(pin, new LinearLayout.LayoutParams(-1, Dp(58)) { TopMargin = Dp(14), BottomMargin = Dp(8) });
-        var pinHelp = Body("Choose a private administrator PIN. There is no default PIN on new installations.");
-        accessCard.AddView(pinHelp, Margin(bottom: 16));
+        var pinHelp = Body("Administrator PIN · opens every setting. There is no default PIN on new installations.");
+        accessCard.AddView(pinHelp, Margin(bottom: 12));
+
+        var skipTodayCode = ModernInput("Skip-today code", 6);
+        skipTodayCode.Text = config.SkipTodayCode;
+        skipTodayCode.InputType = Android.Text.InputTypes.ClassNumber;
+        accessCard.AddView(skipTodayCode, new LinearLayout.LayoutParams(-1, Dp(58)) { BottomMargin = Dp(8) });
+
+        var temporaryUnlockCode = ModernInput("15-minute unlock code", 6);
+        temporaryUnlockCode.Text = config.TemporaryUnlockCode;
+        temporaryUnlockCode.InputType = Android.Text.InputTypes.ClassNumber;
+        accessCard.AddView(temporaryUnlockCode, new LinearLayout.LayoutParams(-1, Dp(58)) { BottomMargin = Dp(8) });
+        accessCard.AddView(Body("Skip today stays unlocked until the next local date. The 15-minute pass ends early if School Kiosk is opened again."), Margin(bottom: 16));
+
+        if (config.IsTodaySkipped(DateTime.Now) || config.IsTemporaryUnlockActive(DateTime.Now))
+        {
+            var resumeLocking = SecondaryButton("Resume scheduled locking now", "Clear the active skip or temporary pass", destructive: true);
+            resumeLocking.Click += (_, _) =>
+            {
+                config.ClearAccessOverrides();
+                dialog.Dismiss();
+                ScheduleReceiver.ScheduleNext(this);
+                ApplySchedule();
+            };
+            accessCard.AddView(resumeLocking, new LinearLayout.LayoutParams(-1, Dp(62)) { BottomMargin = Dp(9) });
+        }
 
         var connectivityRow = new LinearLayout(this) { Orientation = Orientation.Horizontal };
         var wifi = SecondaryButton("Wi-Fi", "Networks & internet");
@@ -957,6 +996,10 @@ public sealed class MainActivity : Activity
             if (!Uri.TryCreate(value, UriKind.Absolute, out var parsed) || parsed.Scheme != "https" || string.IsNullOrWhiteSpace(parsed.Host))
                 message = "Enter a complete HTTPS website address.";
             else if ((pin.Text ?? "").Length < 4) message = "The admin PIN needs at least four digits.";
+            else if ((skipTodayCode.Text ?? "").Length < 4) message = "The skip-today code needs at least four digits.";
+            else if ((temporaryUnlockCode.Text ?? "").Length < 4) message = "The 15-minute code needs at least four digits.";
+            else if (new[] { pin.Text, skipTodayCode.Text, temporaryUnlockCode.Text }.Distinct().Count() != 3)
+                message = "Use a different number for each access code.";
             if (message is not null)
             {
                 error.Text = message;
@@ -965,6 +1008,8 @@ public sealed class MainActivity : Activity
             }
             config.Url = value;
             config.Pin = pin.Text!;
+            config.SkipTodayCode = skipTodayCode.Text!;
+            config.TemporaryUnlockCode = temporaryUnlockCode.Text!;
             config.Brightness = brightnessValue;
             config.AdaptiveBrightness = adaptiveBrightness;
             config.SetupComplete = true;

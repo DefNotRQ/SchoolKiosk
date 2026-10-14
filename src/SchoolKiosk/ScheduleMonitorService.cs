@@ -75,9 +75,10 @@ public sealed class ScheduleMonitorService : Service
             StopSelf();
             return;
         }
-        var active = config.IsKioskTime(DateTime.Now);
+        var now = DateTime.Now;
+        var active = config.IsKioskTime(now);
         var keyguard = (KeyguardManager?)GetSystemService(KeyguardService);
-        if ((active || wasActive) && (!MainActivity.IsVisible || !MainActivity.HasKioskWindowFocus) && keyguard?.IsKeyguardLocked != true)
+        if (active && (!MainActivity.IsVisible || !MainActivity.HasKioskWindowFocus) && keyguard?.IsKeyguardLocked != true)
         {
             try
             {
@@ -113,7 +114,10 @@ public sealed class ScheduleMonitorService : Service
         wasActive = active;
         // Recover a manually unpinned/hidden activity in seconds, while keeping
         // the lighter minute cadence outside school hours.
-        handler.PostDelayed(() => Tick(), active ? 1_000 : 60_000 - DateTimeOffset.Now.ToUnixTimeMilliseconds() % 60_000);
+        var watchOverrideExpiry = config.IsScheduledKioskTime(now) && !config.IsTodaySkipped(now);
+        handler.PostDelayed(() => Tick(), active || watchOverrideExpiry
+            ? 1_000
+            : 60_000 - DateTimeOffset.Now.ToUnixTimeMilliseconds() % 60_000);
     }
 
     public override IBinder? OnBind(Intent? intent) => null;

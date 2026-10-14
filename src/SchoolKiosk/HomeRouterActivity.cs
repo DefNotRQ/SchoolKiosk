@@ -33,19 +33,6 @@ public sealed class HomeRouterActivity : Activity
             return;
         }
 
-        try
-        {
-            var honorHome = new Intent(Intent.ActionMain);
-            honorHome.AddCategory(Intent.CategoryHome);
-            honorHome.SetComponent(new ComponentName("com.hihonor.android.launcher", "com.hihonor.android.launcher.unihome.UniHomeLauncher"));
-            honorHome.AddFlags(ActivityFlags.NewTask | ActivityFlags.ClearTop);
-            StartActivity(honorHome);
-        }
-        catch
-        {
-            // This build targets Honor Pad 10. If a launcher update renames its
-            // component, leave the current app instead of recursively resolving Home.
-            MoveTaskToBack(true);
-        }
+        HomeLauncher.Open(this);
     }
 }

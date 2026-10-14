@@ -16,7 +16,7 @@
 
 School Kiosk turns an Android tablet into a scheduled, full-screen web browser. It is optimized for an Honor Pad 10 and is designed to recover its browser, schedule, and kiosk state after navigation attempts, process termination, or reboot.
 
-Fresh installations contain **no default website and no default administrator PIN**. The administrator chooses both during first-run setup.
+Fresh installations contain **no default website and no default administrator PIN**. The administrator chooses both during first-run setup. Separate skip-today and 15-minute access codes are generated uniquely on each installation and can be changed from the protected settings panel.
 
 ## Download
 
@@ -30,6 +30,8 @@ Download the latest signed ARM64 APK from [GitHub Releases](https://github.com/D
 - Automatic WebView renderer recovery, connection status, loading progress, and offline retry screen.
 - Wi-Fi and Bluetooth shortcuts plus manual and automatic brightness controls.
 - Failed-PIN lockout and a five-minute administrator-session timeout.
+- A skip-today code that suspends the current local date's kiosk session and automatically returns to the normal schedule the next day.
+- A renewable 15-minute unlock code; reopening School Kiosk during the break immediately resumes scheduled locking.
 - Foreground schedule monitor, exact boundary alarms, and boot recovery.
 - Mandatory deployment-readiness gate: locking stays disabled until required permissions and device settings pass.
 - Device-owner support for persistent Home routing, lock-task allowlisting, and stronger system UI restrictions.
@@ -85,7 +87,7 @@ adb install path/to/com.ahura.schoolkiosk-Signed.apk
 adb shell am start -n com.ahura.schoolkiosk/.MainActivity
 ```
 
-Complete first-run setup by entering a full HTTPS URL and a private administrator PIN of at least four digits.
+Complete first-run setup by entering a full HTTPS URL and a private administrator PIN of at least four digits. Review or replace the two generated temporary-access codes before deployment; all three codes must be different.
 
 For reliable dedicated-device restrictions, provision the app as device owner. See [Device setup](docs/DEVICE_SETUP.md).
 

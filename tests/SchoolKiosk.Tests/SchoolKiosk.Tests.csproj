@@ -3,5 +3,6 @@
   <ItemGroup>
     <Compile Include="../../src/SchoolKiosk/SchoolSchedule.cs" Link="SchoolSchedule.cs" />
     <Compile Include="../../src/SchoolKiosk/KioskReadinessState.cs" Link="KioskReadinessState.cs" />
+    <Compile Include="../../src/SchoolKiosk/KioskAccessPolicy.cs" Link="KioskAccessPolicy.cs" />
   </ItemGroup>
 </Project>

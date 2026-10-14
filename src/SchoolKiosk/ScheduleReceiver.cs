@@ -39,15 +39,22 @@ public sealed class ScheduleReceiver : BroadcastReceiver
             .SelectMany(offset =>
             {
                 var day = now.Date.AddDays(offset);
-                if (!cfg.IsDayEnabled(day.DayOfWeek)) return Array.Empty<(DateTime Time, bool IsStart)>();
+                if (!cfg.IsDayEnabled(day.DayOfWeek) || cfg.IsTodaySkipped(day))
+                    return Array.Empty<(DateTime Time, bool IsStart)>();
                 var start = day.AddMinutes(cfg.StartMinutes);
                 var endDay = cfg.EndMinutes > cfg.StartMinutes ? day : day.AddDays(1);
                 var end = endDay.AddMinutes(cfg.EndMinutes);
                 return new[] { (Time: start, IsStart: true), (Time: end, IsStart: false) };
             })
             .Where(item => item.Time > now)
-            .OrderBy(item => item.Time)
             .ToList();
+        if (cfg.IsTemporaryUnlockActive(now))
+        {
+            var expiry = DateTimeOffset.FromUnixTimeMilliseconds(cfg.TemporaryUnlockUntilUnixMs).LocalDateTime;
+            if (expiry > now && cfg.IsScheduledKioskTime(expiry) && !cfg.IsTodaySkipped(expiry))
+                candidates.Add((expiry, true));
+        }
+        candidates = candidates.OrderBy(item => item.Time).ToList();
         if (candidates.Count == 0) return;
         var alarm = (AlarmManager?)context.GetSystemService(Context.AlarmService);
         if (alarm is null) return;
