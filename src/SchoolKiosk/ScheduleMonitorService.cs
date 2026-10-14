@@ -77,11 +77,30 @@ public sealed class ScheduleMonitorService : Service
         }
         var active = config.IsKioskTime(DateTime.Now);
         var keyguard = (KeyguardManager?)GetSystemService(KeyguardService);
-        if ((active || wasActive) && !MainActivity.IsVisible && keyguard?.IsKeyguardLocked != true)
+        if ((active || wasActive) && (!MainActivity.IsVisible || !MainActivity.HasKioskWindowFocus) && keyguard?.IsKeyguardLocked != true)
         {
+            try
+            {
+                var manager = (ActivityManager?)GetSystemService(ActivityService);
+                manager?.AppTasks?.FirstOrDefault()?.MoveToFront();
+            }
+            catch (Exception ex) { Log.Warn("SchoolKiosk", "Task recovery denied: " + ex.GetType().Name); }
             var launch = new Intent(this, typeof(MainActivity));
+            launch.SetAction("com.ahura.schoolkiosk.RECOVER_FOREGROUND");
             launch.AddFlags(ActivityFlags.NewTask | ActivityFlags.ClearTop | ActivityFlags.SingleTop);
-            try { StartActivity(launch); }
+            try
+            {
+                Bundle? options = null;
+                if (OperatingSystem.IsAndroidVersionAtLeast(34))
+                {
+                    var activityOptions = ActivityOptions.MakeBasic();
+                    activityOptions!.SetPendingIntentCreatorBackgroundActivityStartMode(OperatingSystem.IsAndroidVersionAtLeast(36)
+                        ? BackgroundActivityStartMode.AllowAlways : BackgroundActivityStartMode.Allowed);
+                    options = activityOptions.ToBundle();
+                }
+                PendingIntent.GetActivity(this, 93, launch,
+                    PendingIntentFlags.UpdateCurrent | PendingIntentFlags.Immutable, options)?.Send();
+            }
             catch (Exception ex) { Log.Warn("SchoolKiosk", "Schedule launch denied: " + ex.GetType().Name); }
         }
         if (reschedule || !scheduleArmed || active != wasActive)

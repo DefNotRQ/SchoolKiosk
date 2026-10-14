@@ -17,6 +17,7 @@ namespace SchoolKiosk;
 public sealed class MainActivity : Activity
 {
     internal static bool IsVisible { get; private set; }
+    internal static bool HasKioskWindowFocus { get; private set; }
     private const int MaxTabs = 20;
     private const int NotificationPermissionRequestCode = 401;
     private KioskConfig config = null!;
@@ -108,20 +109,40 @@ public sealed class MainActivity : Activity
         var generation = ++foregroundRecoveryGeneration;
         handler.PostDelayed(() =>
         {
-            if (generation != foregroundRecoveryGeneration || resumed || IsFinishing || IsDestroyed) return;
+            if (generation != foregroundRecoveryGeneration || (resumed && HasKioskWindowFocus) || IsFinishing || IsDestroyed) return;
             if (!KioskReadiness.IsReady(this, config) || !config.IsKioskTime(DateTime.Now)) return;
             var keyguard = (KeyguardManager?)GetSystemService(KeyguardService);
             if (keyguard?.IsKeyguardLocked == true) return;
+            try
+            {
+                var manager = (ActivityManager?)GetSystemService(ActivityService);
+                manager?.AppTasks?.FirstOrDefault()?.MoveToFront();
+            }
+            catch { }
             var launch = new Intent(this, typeof(MainActivity));
             launch.SetAction("com.ahura.schoolkiosk.RECOVER_FOREGROUND");
             launch.AddFlags(ActivityFlags.NewTask | ActivityFlags.ClearTop | ActivityFlags.SingleTop);
-            try { StartActivity(launch); } catch { }
+            try
+            {
+                Bundle? options = null;
+                if (OperatingSystem.IsAndroidVersionAtLeast(34))
+                {
+                    var activityOptions = ActivityOptions.MakeBasic();
+                    activityOptions!.SetPendingIntentCreatorBackgroundActivityStartMode(OperatingSystem.IsAndroidVersionAtLeast(36)
+                        ? BackgroundActivityStartMode.AllowAlways : BackgroundActivityStartMode.Allowed);
+                    options = activityOptions.ToBundle();
+                }
+                PendingIntent.GetActivity(this, 92, launch,
+                    PendingIntentFlags.UpdateCurrent | PendingIntentFlags.Immutable, options)?.Send();
+            }
+            catch { try { StartActivity(launch); } catch { } }
         }, 500);
     }
 
     public override void OnWindowFocusChanged(bool hasFocus)
     {
         base.OnWindowFocusChanged(hasFocus);
+        HasKioskWindowFocus = hasFocus;
         if (hasFocus)
         {
             ApplySystemBarMode(config?.IsKioskTime(DateTime.Now) == true && KioskReadiness.IsReady(this, config));
@@ -129,6 +150,8 @@ public sealed class MainActivity : Activity
         }
         if (hasFocus && config is not null)
             handler.PostDelayed(ApplySchedule, 100);
+        else if (!hasFocus && config is not null)
+            QueueForegroundRecovery();
     }
 
     public override bool DispatchTouchEvent(MotionEvent? ev)
