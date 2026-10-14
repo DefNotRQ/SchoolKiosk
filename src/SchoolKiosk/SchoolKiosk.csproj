@@ -6,8 +6,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationId>com.ahura.schoolkiosk</ApplicationId>
     <ApplicationTitle>School Kiosk</ApplicationTitle>
-    <ApplicationVersion>25</ApplicationVersion>
-    <ApplicationDisplayVersion>1.8.3</ApplicationDisplayVersion>
+    <ApplicationVersion>26</ApplicationVersion>
+    <ApplicationDisplayVersion>1.8.4</ApplicationDisplayVersion>
     <SupportedOSPlatformVersion>26</SupportedOSPlatformVersion>
     <AndroidTargetSdkVersion>36</AndroidTargetSdkVersion>
     <AndroidPackageFormat>apk</AndroidPackageFormat>

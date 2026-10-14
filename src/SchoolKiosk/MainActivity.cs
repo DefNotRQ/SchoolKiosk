@@ -1301,10 +1301,29 @@ public sealed class MainActivity : Activity
 
         var dialog = NewDialog();
         var shell = new LinearLayout(this) { Orientation = Orientation.Vertical };
-        shell.Background = Rounded(Color.ParseColor("#F5F7FC"), 26);
-        shell.SetPadding(Dp(28), Dp(24), Dp(28), Dp(20));
-        shell.AddView(Heading("Finish device setup", 25));
-        shell.AddView(Body("Kiosk locking is paused. Complete every required item below, then recheck. Nothing will be pinned until all checks pass."), Margin(top: 6, bottom: 18));
+        shell.Background = Rounded(Color.ParseColor("#F7F9FD"), 24);
+        shell.SetPadding(Dp(22), Dp(20), Dp(22), Dp(18));
+
+        var readyCount = new[] { state.Overlay, state.ExactAlarms, state.Notifications, state.BatteryExemption, state.LockTask, state.BackgroundLaunchConfirmed }.Count(value => value);
+        var header = new LinearLayout(this) { Orientation = Orientation.Horizontal };
+        header.SetGravity(GravityFlags.CenterVertical);
+        var mark = new TextView(this) { Text = "✓", TextSize = 18, Gravity = GravityFlags.Center };
+        mark.SetTypeface(Android.Graphics.Typeface.Default, Android.Graphics.TypefaceStyle.Bold);
+        mark.SetTextColor(Color.White);
+        mark.Background = Rounded(Color.ParseColor("#3157D5"), 13);
+        header.AddView(mark, new LinearLayout.LayoutParams(Dp(40), Dp(40)) { RightMargin = Dp(12) });
+        var headerCopy = new LinearLayout(this) { Orientation = Orientation.Vertical };
+        headerCopy.AddView(Heading("Device readiness", 22));
+        var summary = Body("Locking is paused until every required check is ready.");
+        summary.TextSize = 12.5f;
+        headerCopy.AddView(summary);
+        header.AddView(headerCopy, new LinearLayout.LayoutParams(0, -2, 1));
+        var count = new TextView(this) { Text = $"{readyCount}/6 ready", TextSize = 12.5f, Gravity = GravityFlags.Center };
+        count.SetTypeface(Android.Graphics.Typeface.Default, Android.Graphics.TypefaceStyle.Bold);
+        count.SetTextColor(Color.ParseColor("#2549B8"));
+        count.Background = Rounded(Color.ParseColor("#E9EEFC"), 12);
+        header.AddView(count, new LinearLayout.LayoutParams(Dp(92), Dp(34)) { LeftMargin = Dp(10) });
+        shell.AddView(header, Margin(bottom: 16));
 
         var scroll = new ScrollView(this) { FillViewport = true, VerticalScrollBarEnabled = false };
         var content = new LinearLayout(this) { Orientation = Orientation.Vertical };
@@ -1312,18 +1331,35 @@ public sealed class MainActivity : Activity
 
         void AddRequirement(string title, string detail, bool complete, string action, System.Action fix)
         {
-            var card = SectionCard((complete ? "✓  " : "!  ") + title, complete ? "Ready" : detail);
-            if (complete)
-            {
-                card.Background = Rounded(Color.ParseColor("#F0FAF5"), 22, Color.ParseColor("#B9E7CF"), 1);
-            }
-            else
+            var row = new LinearLayout(this) { Orientation = Orientation.Horizontal };
+            row.SetGravity(GravityFlags.CenterVertical);
+            row.SetPadding(Dp(14), Dp(11), Dp(12), Dp(11));
+            row.Background = Rounded(complete ? Color.ParseColor("#F1F9F5") : Color.White, 16,
+                complete ? Color.ParseColor("#CBE8D8") : Color.ParseColor("#DCE5F3"), 1);
+
+            var statusMark = new TextView(this) { Text = complete ? "✓" : "!", TextSize = 15, Gravity = GravityFlags.Center };
+            statusMark.SetTypeface(Android.Graphics.Typeface.Default, Android.Graphics.TypefaceStyle.Bold);
+            statusMark.SetTextColor(complete ? Color.ParseColor("#18794E") : Color.ParseColor("#B45309"));
+            statusMark.Background = Rounded(complete ? Color.ParseColor("#DDF3E7") : Color.ParseColor("#FFF0D6"), 11);
+            row.AddView(statusMark, new LinearLayout.LayoutParams(Dp(34), Dp(34)) { RightMargin = Dp(12) });
+
+            var copy = new LinearLayout(this) { Orientation = Orientation.Vertical };
+            var titleView = Heading(title, 15);
+            copy.AddView(titleView);
+            var detailView = Body(complete ? "Ready" : detail);
+            detailView.TextSize = 12;
+            detailView.SetMaxLines(2);
+            copy.AddView(detailView, Margin(top: 1));
+            row.AddView(copy, new LinearLayout.LayoutParams(0, -2, 1));
+
+            if (!complete)
             {
                 var button = ActionButton(action, primary: true);
+                button.TextSize = 12.5f;
                 button.Click += (_, _) => fix();
-                card.AddView(button, new LinearLayout.LayoutParams(-1, Dp(50)) { TopMargin = Dp(12) });
+                row.AddView(button, new LinearLayout.LayoutParams(Dp(142), Dp(42)) { LeftMargin = Dp(12) });
             }
-            content.AddView(card, Margin(bottom: 10));
+            content.AddView(row, Margin(bottom: 8));
         }
 
         AddRequirement("Display over other apps",
@@ -1350,13 +1386,25 @@ public sealed class MainActivity : Activity
             : isXiaomi
                 ? "Enable Background autostart, choose No restrictions for battery use, and lock School Kiosk in Recents."
                 : "Allow School Kiosk to auto-start and run in the background in your manufacturer's app or battery settings.";
-        var launchCard = SectionCard((state.BackgroundLaunchConfirmed ? "✓  " : "!  ") + "Manufacturer app launch",
-            state.BackgroundLaunchConfirmed ? "Confirmed" : launchInstructions);
-        if (state.BackgroundLaunchConfirmed)
-        {
-            launchCard.Background = Rounded(Color.ParseColor("#F0FAF5"), 22, Color.ParseColor("#B9E7CF"), 1);
-        }
-        else
+        var launchCard = new LinearLayout(this) { Orientation = Orientation.Vertical };
+        launchCard.SetPadding(Dp(14), Dp(11), Dp(12), Dp(11));
+        launchCard.Background = Rounded(state.BackgroundLaunchConfirmed ? Color.ParseColor("#F1F9F5") : Color.White, 16,
+            state.BackgroundLaunchConfirmed ? Color.ParseColor("#CBE8D8") : Color.ParseColor("#DCE5F3"), 1);
+        var launchHeader = new LinearLayout(this) { Orientation = Orientation.Horizontal };
+        launchHeader.SetGravity(GravityFlags.CenterVertical);
+        var launchMark = new TextView(this) { Text = state.BackgroundLaunchConfirmed ? "✓" : "!", TextSize = 15, Gravity = GravityFlags.Center };
+        launchMark.SetTypeface(Android.Graphics.Typeface.Default, Android.Graphics.TypefaceStyle.Bold);
+        launchMark.SetTextColor(state.BackgroundLaunchConfirmed ? Color.ParseColor("#18794E") : Color.ParseColor("#B45309"));
+        launchMark.Background = Rounded(state.BackgroundLaunchConfirmed ? Color.ParseColor("#DDF3E7") : Color.ParseColor("#FFF0D6"), 11);
+        launchHeader.AddView(launchMark, new LinearLayout.LayoutParams(Dp(34), Dp(34)) { RightMargin = Dp(12) });
+        var launchCopy = new LinearLayout(this) { Orientation = Orientation.Vertical };
+        launchCopy.AddView(Heading("Manufacturer app launch", 15));
+        var launchDetail = Body(state.BackgroundLaunchConfirmed ? "Ready" : launchInstructions);
+        launchDetail.TextSize = 12;
+        launchCopy.AddView(launchDetail, Margin(top: 1));
+        launchHeader.AddView(launchCopy, new LinearLayout.LayoutParams(0, -2, 1));
+        launchCard.AddView(launchHeader);
+        if (!state.BackgroundLaunchConfirmed)
         {
             var launchActions = new LinearLayout(this) { Orientation = Orientation.Horizontal };
             var open = ActionButton("Open App launch", primary: false);
@@ -1367,27 +1415,26 @@ public sealed class MainActivity : Activity
                 config.BackgroundLaunchConfirmed = true;
                 ShowReadinessGate(rebuild: true);
             };
-            launchActions.AddView(open, new LinearLayout.LayoutParams(0, Dp(50), 1) { RightMargin = Dp(6) });
-            launchActions.AddView(confirm, new LinearLayout.LayoutParams(0, Dp(50), 1) { LeftMargin = Dp(6) });
-            launchCard.AddView(launchActions, new LinearLayout.LayoutParams(-1, Dp(50)) { TopMargin = Dp(12) });
+            open.TextSize = 12.5f;
+            confirm.TextSize = 12.5f;
+            launchActions.AddView(open, new LinearLayout.LayoutParams(0, Dp(42), 1) { RightMargin = Dp(5) });
+            launchActions.AddView(confirm, new LinearLayout.LayoutParams(0, Dp(42), 1) { LeftMargin = Dp(5) });
+            launchCard.AddView(launchActions, new LinearLayout.LayoutParams(-1, Dp(42)) { TopMargin = Dp(10), LeftMargin = Dp(46) });
         }
-        content.AddView(launchCard, Margin(bottom: 10));
+        content.AddView(launchCard, Margin(bottom: 8));
 
-        var ownerCard = SectionCard(state.DeviceOwner ? "Enhanced protection active" : "Enhanced protection optional",
-            state.DeviceOwner ? "This tablet is provisioned in device-owner mode." : "Device-owner mode is not required for readiness, but it provides stronger kiosk protection than screen pinning.");
-        content.AddView(ownerCard, Margin(bottom: 10));
         shell.AddView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
 
         var recheck = ActionButton("Recheck everything", primary: true);
         recheck.Click += (_, _) => ShowReadinessGate(rebuild: true);
-        shell.AddView(recheck, new LinearLayout.LayoutParams(-1, Dp(54)) { TopMargin = Dp(10) });
+        shell.AddView(recheck, new LinearLayout.LayoutParams(-1, Dp(48)) { TopMargin = Dp(10) });
 
         dialog.SetContentView(shell);
         dialog.SetCancelable(false);
         dialog.SetCanceledOnTouchOutside(false);
         dialog.DismissEvent += (_, _) => { if (ReferenceEquals(readinessDialog, dialog)) readinessDialog = null; };
         readinessDialog = dialog;
-        ShowDialog(dialog, widthFraction: 0.78f, heightFraction: 0.92f);
+        ShowDialog(dialog, widthDp: 680, heightFraction: 0.84f);
     }
 
     private void OpenReadinessSetting(string requirement)
